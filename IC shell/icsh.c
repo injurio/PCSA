@@ -92,6 +92,14 @@ int command(char *buffer) {
         close(file_desc);
       }
       close(file_desc);
+    } else if (strstr(buffer, "help")) {
+      printf("This shell's built-in function contains\n");
+      printf("--> echo <text> -- the echo command prints a given text (until EOL) back to the console.\n");
+      printf("--> echo $?  -- this prints out the exit status code of the previous command. You may assume that all build-in commands exits with exit code 0\n");
+      printf("--> In the case of >, the output of the program will be redirected to the specified file name.\n");
+      printf("--> jobs - list current jobs \n");
+      printf("--> fg %c<job_id>: Brings the job identified by <job_id> into the foreground.\n", '%');
+      printf("--> etc.\n")
     } else if (strstr(buffer, "jobs")) {
         for (int i = 1; i < 100; i++) {
           if (tli[i].pid != 0) {
@@ -113,8 +121,7 @@ int command(char *buffer) {
         waitpid(tli[i].pid, NULL, WUNTRACED);
         tli[i].stage = 3;
         return 1;
-      }
-      else if (strstr(buffer, "&")) {
+      } else if (strstr(buffer, "&")) {
       pid = fork();
         if (pid == 0) { // <-- Child
           char * token = strtok(buffer, "&");
@@ -126,8 +133,7 @@ int command(char *buffer) {
           printf("[%d] %d \n", job_id, pid);
           return 1;
         }
-    }
-      else {
+    } else {
         pid = fork();
         if (pid < 0) {
           perror("Fork Error");
