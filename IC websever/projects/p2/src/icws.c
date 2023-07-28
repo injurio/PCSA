@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -20,6 +22,7 @@
 #define MAXTHREAD 256
 #define PERSISTENT 1
 #define CLOSE 0
+#define ENVSIZE 21
 #define infinite for(;;)
 
 #define YYERROR_VERBOSE
@@ -31,7 +34,7 @@
 
 typedef struct sockaddr SA;
 
-char* dirName;
+char* dirName,*cgi_dirName,*port,*address;
 int thread_number,timeout,taskCount = 0;
 
 pthread_t thread_pool[MAXTHREAD];
@@ -80,25 +83,26 @@ char* get_Extension(char *filename){
 }
 
 char* mime_type(char *ext){
-	if(strcmp(ext, "html") == 0){
+        printf("ext is %s\n",ext);
+	if(!strcmp(ext, "html")){
 		return "text/html";
 	}
-	else if(strcmp(ext, "css") == 0){
+	else if(!strcmp(ext, "css")){
 		return "text/css";
 	}
-	else if(strcmp(ext, "txt") == 0 ){
+	else if(!strcmp(ext, "txt")){
 		return "text/plain";
 	}
-	else if(strcmp(ext, "js") == 0  ||strcmp(ext, "mjs") == 0){
+	else if(!strcmp(ext, "js") || !strcmp(ext, "mjs")){
 		return "text/javascript";
 	}
-	else if(strcmp(ext, "jpg") == 0 ||strcmp(ext, "jpeg") == 0){
+	else if(!strcmp(ext, "jpg") || !strcmp(ext, "jpeg")){
 		return "image/jpeg";
 	}
-	else if(strcmp(ext, "png") == 0){
+	else if(!strcmp(ext, "png")){
 		return "image/png";
 	}
-	else if(strcmp(ext, "gif") == 0){
+	else if(!strcmp(ext, "gif")){
 		return "image/gif";
 	}
 	else{
@@ -108,7 +112,7 @@ char* mime_type(char *ext){
 
 void get_filename(char* temp,char* root,char* req){
 	strcpy(temp, root);
-	if(strcmp(req,"/") == 0){
+	if(!strcmp(req,"/")){
 		req = "/index.html";
 	}
 	else if(req[0] != '/'){
@@ -129,6 +133,12 @@ void server_last_modified(char* last_modified,struct stat statbuf){
 }
 
 void respond(int connFd,char *root,char *object,int key,char* type){
+
+        if(key == 2){
+        	printf("Sorry, I havent do post yet please forgive me\n");
+        	return;
+        }
+        
 	char filename[BUFSIZE];
 	get_filename(filename, root, object);
 	int inFd = open(filename, O_RDONLY);
@@ -181,6 +191,98 @@ void respond(int connFd,char *root,char *object,int key,char* type){
 	}
 }
 
+void fail_exit(char *msg) { fprintf(stderr, "%s\n", msg); exit(-1); }
+
+int piper(int connFd,Request *request){
+	char* args[2];
+	args[0] = cgi_dirName;
+	args[1] = NULL;
+	
+	char* header_name,*header_value;
+	
+	for(int i = 0;i < request->header_count;i++){
+		header_name = request->headers[i].header_name;
+		header_value = request->headers[i].header_value;
+		if(!strcasecmp(header_name,"CONNECTION")){
+			setenv("HTTP_CONNECTION",header_value,1);
+		}
+		else if(!strcasecmp(header_name,"ACCEPT")){
+			setenv("HTTP_ACCEPT",header_value,1);
+		}
+		else if(!strcasecmp(header_name,"REFERER")){		
+			setenv("HTTP_REFERER",header_value,1);
+		}
+		else if(!strcasecmp(header_name,"ACCEPT-ENCODING")){
+			setenv("HTTP_ACCEPT_ENCODING",header_value,1);
+		}
+		else if(!strcasecmp(header_name,"ACCEPT-LANGUAGE")){
+			setenv("HTTP_ACCEPT_LANGUAGE",header_value,1);
+		}
+		else if(!strcasecmp(header_name,"COTENT-LENGTH")){
+			setenv("CONTENT_LENGTH",header_value,1);
+		}
+		else if(!strcasecmp(header_name,"USER-AGENT")){
+			setenv("HTTP_USER_AGENT",header_value,1);
+		}
+		else if(!strcasecmp(header_name,"ACCEPT-COOKIE")){
+			setenv("HTTP_COOKIE",header_value,1);
+		}
+		else if(!strcasecmp(header_name,"ACCEPT-CHARSET")){
+			setenv("HTTP_ACCEPT_CHARSET",header_value,1);
+		}
+		else if(!strcasecmp(header_name,"HOST")){
+			setenv("HTTP_HOST",header_value,1);
+		}
+		else if(!strcasecmp(header_name,"CONTENT-TYPE")){
+			setenv("CONTENT_TYPE",header_value,1);
+		}
+	}
+	//Query & path info
+	char** tokenList[BUFSIZE];
+	char* token = strtok(request->http_uri,"?");
+	tokenList[0] = token;
+	//printf("%s\n",tokenList[0]);
+	token = strtok(NULL,"");
+
+	//Remote address
+	char *char_addr,addr[20];
+	sprintf(addr,"%d",connFd); 
+	char_addr = addr;
+	
+	setenv("SERVER_SOFTWARE","icws",1);
+	setenv("GATE_INTERFACE","CGI/1.1",1);
+	setenv("REQUEST_METHOD",request->http_method,1);
+	setenv("REQUEST_URI",request->http_uri,1);
+	setenv("SERVER_PROTOCOL","HTTP/1.1",1);
+	setenv("QUERY_STRING",token,1);
+	setenv("REMOTE_ADDR",char_addr,1);
+	setenv("PATH_INFO",tokenList[0],1);
+	setenv("SERVER_PORT",port,1);
+	
+	pid_t pid = 0;
+	int pipefd[2];
+	
+	pipe(pipefd);
+	pid = fork();
+	if(!pid){
+		close(pipefd[0]);
+		dup2(pipefd[1],STDOUT_FILENO);
+		execv(args[0],args);
+	}
+	close(pipefd[1]);
+
+	int w;
+	waitpid(pid,&w,WNOHANG);
+	
+	char buf[BUFSIZE];
+	ssize_t numRead;
+	while((numRead = read(pipefd[0],buf,BUFSIZE)) > 0){
+		write_all(connFd,buf,numRead);
+	}
+	
+	return 0;
+}
+
 int serve_http(int connFd, char* root){   
    char buf[BUFSIZE],line[BUFSIZE];
    struct pollfd fds[1];
@@ -192,7 +294,7 @@ int serve_http(int connFd, char* root){
    	if(pollret < 0){
    		return CLOSE;
    	}
-   	else if(pollret == 0){
+   	else if(!pollret){
    		return CLOSE;
    	}
    	else{
@@ -207,18 +309,22 @@ int serve_http(int connFd, char* root){
    		break;
    	}
    }
+   
+   printf("%s\n",buf);
    pthread_mutex_lock(&mutex_parse);
    Request *request = parse(buf,BUFSIZE,connFd);
    pthread_mutex_unlock(&mutex_parse);
+   
    int connection = PERSISTENT;
    char* connection_type;
+   
     if(request == NULL){
     	respond_with_number(400,connFd);
     	memset(buf,0,BUFSIZE);
     	return connection;
    }
    for(int i = 0;i < request->header_count;i++){
-   	if(strcmp(request->headers[i].header_name,"Connection") == 0){
+   	if(!strcmp(request->headers[i].header_name,"Connection")){
    		if(strcmp(request->headers[i].header_value,"close")){
    		        connection = CLOSE;
    			connection_type = "close";
@@ -229,6 +335,11 @@ int serve_http(int connFd, char* root){
    		break;
    	}
    }
+   
+   char cgi_checker[BUFSIZE];
+   strncpy(cgi_checker,request->http_uri,5);
+  
+   
    if(strcmp(request->http_version,"HTTP/1.1") != 0){
    	respond_with_number(505,connFd);
    	free(request->headers);
@@ -236,11 +347,19 @@ int serve_http(int connFd, char* root){
         memset(buf,0,BUFSIZE);
    	return connection;
    }
-   if(strcmp(request->http_method, "GET") == 0){
+   
+   if((strcasecmp(request->http_method, "GET") == 0 || strcasecmp(request->http_method, "HEAD") == 0 || || strcasecmp(request->http_method, "POST") == 0) && strcmp(cgi_checker,"/cgi/") == 0){
+        printf("Pipe activate--------\n");
+   	piper(connFd,request);
+   }
+   else if(!strcmp(request->http_method, "GET")){
    	respond(connFd,root,request->http_uri,1,connection_type);
    }
-   else if(strcmp(request->http_method, "HEAD") == 0){
+   else if(!strcmp(request->http_method, "HEAD")){
    	respond(connFd,root,request->http_uri,0,connection_type);
+   }
+   else if(!strcmp(request->http_method, "POST")){
+   	respond(connFd,root,request->http_uri,2,connection_type);
    }
    else{
    	respond_with_number(501,connFd);
@@ -273,18 +392,43 @@ void* thread_function(void *args){
 	{
 		struct survival_bag task;
 		pthread_mutex_lock(&mutex_q);
-		while(taskCount == 0){
+		while(!taskCount){
 			pthread_cond_wait(&condition_var,&mutex_q);
 		}
+		
+		task = taskQ[0];
 		for(int i = 0;i < taskCount-1;i++){
 			taskQ[i] = taskQ[i+1];
 		}
+		
+		
 		taskCount--;
 		pthread_mutex_unlock(&mutex_q);
-		conn_handler(&taskQ[0]);
+		
+		conn_handler(&task);
+		
+		if(task.connFd < 0){
+			break;
+		}
 	}
 }
 
+
+
+void signalHandler(int sig){
+
+	struct survival_bag *overdose = (struct survival_bag *) malloc(sizeof(struct survival_bag));
+	overdose->connFd = -1;
+	
+	for(int i = 0;i < thread_number; i++){
+	 	pthread_mutex_lock(&mutex_q);
+       		taskQ[taskCount] = *overdose;
+       		taskCount++;
+       		pthread_mutex_unlock(&mutex_q);
+       		pthread_cond_signal(&condition_var);
+	}
+
+}
 //./icws --port <portnumber> --root <folderName> --numThreads <nThread> --timeout <ntime>
 int main(int argc, char* argv[]) {
     if(argc < 7){
@@ -293,19 +437,20 @@ int main(int argc, char* argv[]) {
     }
     
     int opt,option_index;
-    char port[BUFSIZE],root[BUFSIZE],numThreads[BUFSIZE],time_out[BUFSIZE];
+    char port_temp[BUFSIZE],root[BUFSIZE],numThreads[BUFSIZE],time_out[BUFSIZE],cgi_temp[BUFSIZE];
     
     struct option long_options[] = {
     	{"port",1,NULL,'a'},
     	{"root",1,NULL,'b'},
     	{"numThreads",1,NULL,'c'},
-    	{"timeout",1,NULL,'d'}
-    };
+    	{"timeout",1,NULL,'d'},
+    	{"cgiHandler",1,NULL,'e'}
+   };
     
-    while((opt = getopt_long(argc,argv,"a:b:",long_options,&option_index)) != -1){
+    while((opt = getopt_long(argc,argv,"a:b:c:d:e:",long_options,&option_index)) != -1){
     	switch(opt){
     		case 'a':
-    			strcpy(port, optarg);
+    			strcpy(port_temp, optarg);
     			break;
     		case 'b':
     			strcpy(root, optarg);
@@ -316,6 +461,9 @@ int main(int argc, char* argv[]) {
     		case 'd':
     			strcpy(time_out, optarg);
     			break;
+    		case 'e':
+    			strcpy(cgi_temp, optarg);
+    			break;
     		case '?':
     			break;
     		default:
@@ -323,6 +471,8 @@ int main(int argc, char* argv[]) {
     	}
     }
     
+    port = port_temp;
+    cgi_dirName = cgi_temp;
     int listenFd = open_listenfd(port);
     thread_number = atoi(numThreads);
     timeout = atoi(time_out);
@@ -340,7 +490,7 @@ int main(int argc, char* argv[]) {
         socklen_t clientLen = sizeof(struct sockaddr_storage); 
         int connFd = accept(listenFd, (SA *) &clientAddr, &clientLen);
         if(connFd < 0){
-        	fprintf(stderr, "Failed to accpet\n");
+        	fprintf(stderr, "Failed to accept\n");
         	continue;
         }
         
@@ -355,11 +505,12 @@ int main(int argc, char* argv[]) {
         else{
         	 printf("Connection from UNKNOWN.");
         } 
+        
+        address = hostBuf;
+        
        	pthread_mutex_lock(&mutex_q);
-       
        	taskQ[taskCount] = *context;
        	taskCount++;
-       
        	pthread_mutex_unlock(&mutex_q);
        	pthread_cond_signal(&condition_var);
     }
@@ -369,5 +520,9 @@ int main(int argc, char* argv[]) {
     		printf("Failed to join thread");
     	}
     }
+    
+    pthread_mutex_destroy(&mutex_q);
+    pthread_mutex_destroy(&mutex_parse);
+    pthread_cond_destroy(&condition_var);
     return 0;
 }
