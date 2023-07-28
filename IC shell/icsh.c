@@ -3,21 +3,42 @@
  * StudentID: 6280945
  */
 
-#include<stdio.h>
-#include<stdlib.h>
-#include<string.h>
-#include<unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <signal.h>
+#include <errno.h>
 
 #define MAX_CMD_BUFFER 255
 
-int i;
+int i, status, pid;
 char *res, last_command[MAX_CMD_BUFFER], *argv[3];
 void command(char *), my_history(char *), my_read(char *);
 
+void handler(int signum)
+{
+  if (pid == 0) {
+    if (signum == SIGINT) {
+      kill(pid, SIGINT);
+    } else if (signum == SIGTSTP) {
+      signal(SIGTSTP, SIG_DFL);
+    }
+  }
+}
+
 int main(int argc, char * argv []) {
+	
 	char buffer[MAX_CMD_BUFFER];
+	struct sigaction new_action;
+  sigemptyset(&new_action.sa_mask);
+  new_action.sa_handler = handler;
+  new_action.sa_flags = 0;
+  sigaction(SIGINT, &new_action, NULL);
+  sigaction(SIGTSTP, &new_action, NULL);
+
 	if (argc > 1) {
 		my_read(argv[1]);
 	}
@@ -51,11 +72,11 @@ void command(char *buffer) {
         } 
 		// else { printf("bad command\n"); }
     } else {
-		if (fork() == 0) {
+		if ((pid =fork()) == 0) {
 			system(buffer);
+      exit(0);
 		}
-		waitpid(fork(), NULL, 0);
-		// printf("bad command\n");
+		waitpid(pid, NULL, 0);
 	}
 }
 
