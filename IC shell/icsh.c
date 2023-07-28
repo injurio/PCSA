@@ -18,7 +18,20 @@
 
 int i, status, pid;
 char *res, last_command[MAX_CMD_BUFFER], *argv[3];
-void command(char *), my_history(char *), my_read(char *);
+void my_history(char *), my_read(char *);
+int command(char *);
+
+struct test
+{
+  pid_t pid;
+  int stage; // 0-> Non, 1=running, 2=stop, 3=done
+  char str[100];
+};
+
+struct test tli[100]; // -> tli [1] [2] ....
+                      // -> tli [test1] ....
+
+int addStruct(struct test *tli, pid_t pid, char *str, int stage);
 
 void handler(int signum) {
     if (signum == SIGINT && pid == 0) {
@@ -47,7 +60,7 @@ int main(int argc, char * argv []) {
 	}
 }
 
-void command(char *buffer) {
+int command(char *buffer) {
     if (strstr(buffer, "echo")){
 		my_history(buffer);
         for (res = buffer ; *res && *res != ' ' ; res++)
@@ -79,16 +92,52 @@ void command(char *buffer) {
         close(file_desc);
       }
       close(file_desc);
+    } else if (strstr(buffer, "jobs")) {
+        for (int i = 1; i < 100; i++) {
+          if (tli[i].pid != 0) {
+            if (tli[i].stage == 1) { 
+              char Stage[] = "Running";
+              printf("[%d] %s %s", i, Stage, tli[i].str);
+            } else if (tli[i].stage == 2) { 
+              char Stage[] = "Stopped";
+              printf("[%d] %s %s", i, Stage, tli[i].str);
+            }
+          }
+        }
+      } else if (strstr(buffer, "fg")){
+        for (res = buffer ; *res && *res != '%' ; res++)
+            ;
+        char *b = res + 1;
+        int i = atoi(b);
+        kill(-(tli[i].pid), SIGCONT);
+        waitpid(tli[i].pid, NULL, WUNTRACED);
+        tli[i].stage = 3;
+        return 1;
+      }
+      else if (strstr(buffer, "&")) {
+      pid = fork();
+        if (pid == 0) { // <-- Child
+          char * token = strtok(buffer, "&");
+          system(token);
+          printf("\n Done %s", token);
+          exit(0);
+        } else {
+          int job_id = addStruct(tli, pid, buffer, 1);
+          printf("[%d] %d \n", job_id, pid);
+          return 1;
+        }
     }
       else {
-		if ((pid = fork()) == 0) {
-			system(buffer);
-      exit(0);
-		} else if (pid < 0) {
-      perror("Create Fork Error");
-    }
-		waitpid(pid, NULL, 0);
+        pid = fork();
+        if (pid < 0) {
+          perror("Fork Error");
+        } else if (pid == 0) {
+			    system(buffer);
+          exit(0);
+        }
+        waitpid(pid, NULL, 0); 
 	}
+  return 1;
 }
 
 void my_history(char *buffer){
@@ -103,4 +152,16 @@ void my_read(char *filename) {
 		command(line);
 	}
     fclose(ptr);
+}
+
+int addStruct(struct test *tli, pid_t pid, char *str, int stage){
+  for (int i = 1; i < 100; i++){
+    if (tli[i].pid == 0) {
+      tli[i].pid = pid;
+      tli[i].stage = stage;
+      strcpy(tli[i].str, str);
+      return i;
+    }
+  }
+  return -1;
 }
