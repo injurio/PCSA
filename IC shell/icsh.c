@@ -7,21 +7,18 @@
 #include<stdlib.h>
 #include<string.h>
 #include<unistd.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 #define MAX_CMD_BUFFER 255
 
 int i;
-char *res, last_command[MAX_CMD_BUFFER];
+char *res, last_command[MAX_CMD_BUFFER], *argv[3];
 void command(char *), my_history(char *), my_read(char *);
 
 int main(int argc, char * argv []) {
 	char buffer[MAX_CMD_BUFFER];
-	// char * input = argv[1];
-    // for (i = 1; i < argc; i++)
-    // {
-    //     printf("%s ", argv[i]);       
-    // }
-	if (argv[1] != NULL) {
+	if (argc > 1) {
 		my_read(argv[1]);
 	}
 	while(1) {
@@ -51,11 +48,14 @@ void command(char *buffer) {
         if (atoi(res) && atoi(res) >= 1) {
             // printf("bye\n");
             exit(atoi(res));
-        } else {
-            printf("bad command\n");
-        }
+        } 
+		// else { printf("bad command\n"); }
     } else {
-		printf("bad command\n");
+		if (fork() == 0) {
+			system(buffer);
+		}
+		waitpid(fork(), NULL, 0);
+		// printf("bad command\n");
 	}
 }
 
@@ -66,7 +66,6 @@ void my_history(char *buffer){
 void my_read(char *filename) {
 	FILE* ptr;
     ptr = fopen(filename, "r");
- 
 	char line[500];
 	while (fgets(line, sizeof(line), ptr)) {
 		command(line);
