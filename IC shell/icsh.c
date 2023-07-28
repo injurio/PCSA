@@ -11,6 +11,8 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/types.h>
 
 #define MAX_CMD_BUFFER 255
 
@@ -18,15 +20,12 @@ int i, status, pid;
 char *res, last_command[MAX_CMD_BUFFER], *argv[3];
 void command(char *), my_history(char *), my_read(char *);
 
-void handler(int signum)
-{
-  if (pid == 0) {
-    if (signum == SIGINT) {
+void handler(int signum) {
+    if (signum == SIGINT && pid == 0) {
       kill(pid, SIGINT);
-    } else if (signum == SIGTSTP) {
+    } else if (signum == SIGTSTP && pid == 0) {
       signal(SIGTSTP, SIG_DFL);
     }
-  }
 }
 
 int main(int argc, char * argv []) {
@@ -38,14 +37,13 @@ int main(int argc, char * argv []) {
   new_action.sa_flags = 0;
   sigaction(SIGINT, &new_action, NULL);
   sigaction(SIGTSTP, &new_action, NULL);
-
-	if (argc > 1) {
+  if (argc > 1) {
 		my_read(argv[1]);
 	}
 	while(1) {
 		printf("icsh $ ");
-        fgets(buffer, 255, stdin);
-        command(buffer);
+    fgets(buffer, 255, stdin);
+    command(buffer);
 	}
 }
 
@@ -71,11 +69,24 @@ void command(char *buffer) {
             exit(atoi(res));
         } 
 		// else { printf("bad command\n"); }
-    } else {
-		if ((pid =fork()) == 0) {
+    } else if (strstr(buffer, ">")) {
+      char * token = strtok(buffer, ">");
+      char *p = strrchr(buffer, ' ');
+      int file_desc = open(p+2, O_TRUNC | O_CREAT | O_WRONLY, 0666);
+      if ((pid=fork())==0){
+        dup2(file_desc, 1);
+        system(token);
+        close(file_desc);
+      }
+      close(file_desc);
+    }
+      else {
+		if ((pid = fork()) == 0) {
 			system(buffer);
       exit(0);
-		}
+		} else if (pid < 0) {
+      perror("Create Fork Error");
+    }
 		waitpid(pid, NULL, 0);
 	}
 }
