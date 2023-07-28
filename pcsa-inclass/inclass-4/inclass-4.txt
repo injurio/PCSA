@@ -1,0 +1,130 @@
+Today we will explore how a process handles a signal from the operating system. Try the following and answer the questions below.
+
+Interrupt Signal (SIGINT)
+Every keystroke generates a hardware interrupt. The interrupt is then processed by the interrupt handler, which is then put the key into a buffer. The buffer is then read by the TTY driver. Some keystrokes are special such as Ctrl + C which is recognized as an interrupt character and then sends SIGINT to the processes in the foreground process group. 
+
+By default, when a running process receives SIGINT, it terminates. Try running the following code and then press Ctrl + C.
+
+#include <stdlib.h>
+#include <unistd.h>
+#include <stdio.h>
+
+int main()
+{
+  printf("Useless spin\n");
+  while (1);
+}
+
+Q1: What happened to the process when you pressed Ctrl+C?
+
+Ans: 
+
+The process is terminated. This is to be expected as the keystroke 'Crtl + C' sends SIGINT to the process. And, by default, a running process will terminate when it receives the SIGINT signal.
+
+-------------------------
+
+It is possible to modify the behavior of the process when the signal is received.  Now, try running the following program:
+
+#include <signal.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+
+int main(void)
+{
+  struct sigaction new_action;
+  sigemptyset(&new_action.sa_mask);
+  new_action.sa_handler = SIG_IGN;
+  new_action.sa_flags = 0;
+  
+  sigaction(SIGINT, &new_action, NULL);
+
+  printf("Useless spin\n");
+  printf("My PID = %d\n", getpid());
+  while (1);
+}
+
+Q2: What happened when you pressed Ctrl+C?  Can you explain what was done? What is SIG_IGN?
+
+Ans:
+
+Unlike before, the process is not terminated. This is because the SIGINT signal handling behavior is modified so that the SIGINT signal is ignored. This is achieved by setting 'sa_handler' of the new 'sigaction' to SIG_IGN which is a special signal handling option specifying that the signal should be ignored when it is received.
+
+-------------------------
+
+Next, while the previous program is running. From another terminal, try running the following command:
+
+kill -s SIGINT <pid>
+where <pid> is the pid of the useless spin process.
+
+Q3: What happened after you run the command?
+
+Ans:
+
+Nothing happened. More Specifically, the process still does not terminate for the same reason as mentioned in Q2. In other words, the SIGINT signal is being ignored as specified by the SIG_IGN signal handling option.
+
+-------------------------
+
+Now try a different command:
+
+kill -s SIGKILL <pid>
+
+Q4: What happened after you run the command this time?
+
+Ans:
+
+The process is terminated. This is because the SIGKILL signal is a signal that cannot be ignored or overridden.
+
+-------------------------
+
+We can do modify the behavior even further. Try running the following program:
+
+#include <signal.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+
+void handler(int signum)
+{
+  printf("Signal %d received\n", signum);
+  printf("Bye\n");
+  exit(0);
+}
+
+int main(void)
+{
+  struct sigaction new_action;
+  sigemptyset(&new_action.sa_mask);
+  new_action.sa_handler = handler;
+  new_action.sa_flags = 0;
+  sigaction(SIGINT, &new_action, NULL);
+
+  printf("Useless spin\n");
+  printf("My PID = %d\n", getpid());
+  while (1);
+}
+
+Q5: What happened when you pressed Ctrl+C? What is the signal number received?
+
+Ans:
+
+After pressing 'Ctrl + C', the program printed the following:
+Signal 2 received
+Bye
+
+So, from the above output, the signal number received is 2. This is because the SIGINT has a signal number of 2.
+
+-------------------------
+
+Q6: Run the program again and this time press Ctrl+Z. Explain what happen after you press Ctrl + Z. What is the name of this signal?  
+
+Ans: 
+
+After pressing 'Ctrl + Z', the program printed the following:
+[1]+ Stopped        ./q5
+
+So, from the above output, the process is suspended. This is to be expected as the keystroke 'Crtl + Z' sends SIGTSTP to the process. And, by default, a running process will stop and suspend when it receives the SIGTSTP signal. 
+
+Since the SIGTSTP signal handling behavior is not modified, the default action for the signal is taken.
+
+Note that after the process is suspended, the shell displays a message indicating that the process has been suspended (which is why "[1]+ Stopped        ./q5" is printed) and returns control to the command prompt.
