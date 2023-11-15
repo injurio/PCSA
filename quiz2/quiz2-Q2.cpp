@@ -15,6 +15,15 @@ void processPostBody(const std::string& body, std::unordered_map<std::string, in
             std::string command = "./dlc";
             std::string directory = "./" + data;
             std::string commandToRun = command + " " + directory;
+            
+            // Check if the script exists
+            FILE* testScript = fopen(command.c_str(), "r");
+            if (!testScript) {
+                std::cerr << "Error: The script '" << command << "' is not found." << std::endl;
+                return;
+            }
+            fclose(testScript);
+
             FILE* pipe = popen(commandToRun.c_str(), "r");
             if (!pipe) {
                 std::cerr << "Error executing dlc command." << std::endl;
